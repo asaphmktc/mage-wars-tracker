@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Mage Wars Stats Tracker & Companion</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- PeerJS for WebRTC 4-Player Room Connectivity -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            cinzel: ['Cinzel', 'serif'],
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            mage: {
+              dark: '#0c0f17',
+              panel: '#161b26',
+              card: '#1d2333',
+              border: '#2a344a',
+              gold: '#e2b34a',
+              goldHover: '#cfa038',
+              mana: '#3b82f6',
+              manaDark: '#1e3a8a',
+              health: '#ef4444',
+              healthDark: '#7f1d1d',
+              armor: '#94a3b8'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom Scrollbar & Tap highlights */
+    * {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+      -webkit-appearance: none; 
+      margin: 0; 
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: #2a344a;
+      border-radius: 4px;
+    }
+    /* Animated pulse border for active initiative */
+    @keyframes runeGlow {
+      0%, 100% { box-shadow: 0 0 15px rgba(226, 179, 74, 0.25), inset 0 0 10px rgba(226, 179, 74, 0.15); }
+      50% { box-shadow: 0 0 25px rgba(226, 179, 74, 0.5), inset 0 0 16px rgba(226, 179, 74, 0.3); }
+    }
+    .active-initiative {
+      animation: runeGlow 3s infinite ease-in-out;
+      border-color: #e2b34a !important;
+    }
+  </style>
+</head>
+<body class="bg-mage-dark text-slate-100 min-h-screen font-sans flex flex-col antialiased selection:bg-mage-gold selection:text-black">
+
+  <!-- TOP HEADER & ROUND CONTROL BAR -->
+  <header class="sticky top-0 z-40 bg-mage-panel/95 backdrop-blur-md border-b border-mage-border px-3 py-2.5 shadow-xl">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-2">
+      <!-- Title & Emblem -->
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center shadow-lg shadow-amber-900/40 border border-amber-400/40">
+          <i data-lucide="shield" class="w-5 h-5 text-slate-950 stroke-[2.5]"></i>
+        </div>
+        <div>
+          <h1 class="text-base sm:text-lg font-cinzel font-black tracking-wider text-amber-300 leading-none">MAGE WARS</h1>
+          <span class="text-[10px] text-slate-400 font-medium tracking-widest uppercase">Companion Tracker</span>
+        </div>
+      </div>
+
+      <!-- Center: Round & Upkeep Action -->
+      <div class="flex items-center gap-2 sm:gap-3 bg-mage-dark/80 px-2.5 py-1.5 rounded-xl border border-mage-border">
+        <div class="text-center px-1">
+          <div class="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Round</div>
+          <div id="round-display" class="text-xl sm:text-2xl font-cinzel font-black text-amber-400 leading-none">1</div>
+        </div>
+
+        <!-- Next Round Button (Upkeep) -->
+        <button id="btn-next-round" class="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-bold rounded-lg text-xs sm:text-sm shadow-md shadow-amber-950/60 active:scale-95 transition">
+          <i data-lucide="sparkles" class="w-4 h-4"></i>
+          <span class="hidden sm:inline">Upkeep & Next Round</span>
+          <span class="sm:hidden">Upkeep</span>
+        </button>
+      </div>
+
+      <!-- Action Tools (Room Multiplayer, Dice, Active Players, Reset) -->
+      <div class="flex items-center gap-1.5">
+        <!-- Room Connection Modal Button -->
+        <button onclick="toggleRoomModal(true)" id="room-status-badge" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-mage-border bg-mage-card hover:bg-mage-border text-xs font-semibold text-slate-300 transition shadow">
+          <span class="w-2 h-2 rounded-full bg-slate-500" id="network-indicator-dot"></span>
+          <span id="room-status-label" class="hidden sm:inline">Offline (Solo)</span>
+          <i data-lucide="wifi" class="w-3.5 h-3.5 text-slate-400"></i>
+        </button>
+
+        <!-- Player Count / Active Mage Filter (2 to 4 mages) -->
+        <div class="flex items-center bg-mage-dark border border-mage-border rounded-lg p-0.5 text-xs font-bold text-slate-400">
+          <button onclick="setPlayerCount(2)" id="pc-btn-2" class="px-2 py-1 rounded hover:text-amber-300">2P</button>
+          <button onclick="setPlayerCount(3)" id="pc-btn-3" class="px-2 py-1 rounded hover:text-amber-300">3P</button>
+          <button onclick="setPlayerCount(4)" id="pc-btn-4" class="px-2 py-1 rounded hover:text-amber-300">4P</button>
+        </div>
+
+        <!-- View Toggle (Solo Tab vs All Grid on Mobile) -->
+        <div class="flex xl:hidden bg-mage-dark p-0.5 rounded-lg border border-mage-border text-xs" id="mobile-tab-bar">
+          <!-- Dynamic mobile tabs injected here -->
+        </div>
+
+        <!-- Dice Roller Modal Trigger -->
+        <button onclick="toggleDiceModal(true)" class="p-2 bg-mage-card hover:bg-mage-border rounded-lg border border-mage-border text-amber-400 shadow active:scale-95 transition" title="Attack & Effect Dice Roller">
+          <i data-lucide="dices" class="w-5 h-5"></i>
+        </button>
+
+        <!-- Reset Button -->
+        <button onclick="confirmReset()" class="p-2 bg-mage-card hover:bg-red-950/50 rounded-lg border border-mage-border text-slate-400 hover:text-red-400 transition" title="Reset Match">
+          <i data-lucide="rotate-ccw" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN ARENA CONTAINER (Supports up to 4 Mages in responsive 2x2 or 4-col layout) -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-2.5 sm:p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-4 items-start" id="mages-grid">
+    <!-- Dynamic Mage Cards 0..3 -->
+  </main>
+
+  <!-- MULTIPLAYER ROOM MODAL -->
+  <div id="room-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-3">
+    <div class="bg-mage-panel border-2 border-amber-500/60 rounded-2xl w-full max-w-md p-4 sm:p-5 shadow-2xl relative text-slate-100 flex flex-col">
+      <button onclick="toggleRoomModal(false)" class="absolute top-3 right-3 text-slate-400 hover:text-white p-1 rounded-lg">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+
+      <div class="flex items-center gap-2 mb-3">
+        <div class="p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-400">
+          <i data-lucide="users" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h3 class="font-cinzel text-lg font-bold text-amber-300">4-Player Real-Time Sync</h3>
+          <p class="text-xs text-slate-400">P2P connection across up to 4 smartphones or PCs.</p>
+        </div>
+      </div>
+
+      <!-- Current Room Info or Creation form -->
+      <div id="room-unconnected-view" class="space-y-4">
+        <!-- Host New Room -->
+        <div class="p-3.5 bg-mage-card rounded-xl border border-mage-border space-y-2">
+          <div class="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="crown" class="w-4 h-4 text-amber-400"></i>
+            <span>Host a New Game (成為房主)</span>
+          </div>
+          <p class="text-xs text-slate-400">Create a room and share the 4-character Room Code with up to 3 other players.</p>
+          <button onclick="createRoomAsHost()" id="btn-create-room" class="w-full py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-bold rounded-xl text-xs sm:text-sm shadow-md active:scale-95 transition flex items-center justify-center gap-2">
+            <i data-lucide="plus-circle" class="w-4 h-4"></i>
+            <span>Create 4-Player Room</span>
+          </button>
+        </div>
+
+        <div class="text-center text-xs font-bold text-slate-500 uppercase tracking-widest">— OR —</div>
+
+        <!-- Join Room -->
+        <div class="p-3.5 bg-mage-card rounded-xl border border-mage-border space-y-2">
+          <div class="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="log-in" class="w-4 h-4 text-blue-400"></i>
+            <span>Join an Existing Room (輸入代碼加入)</span>
+          </div>
+          <p class="text-xs text-slate-400">Enter the 4-digit code provided by the game host:</p>
+          <div class="flex gap-2">
+            <input type="text" id="join-room-input" maxlength="6" placeholder="e.g. 7A9B" class="flex-1 bg-mage-dark text-center font-mono font-bold tracking-widest text-lg text-amber-400 rounded-xl px-3 py-2 border border-mage-border uppercase focus:outline-none focus:border-amber-500">
+            <button onclick="joinRoomWithCode()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs sm:text-sm active:scale-95 transition">Join</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Connected Room View -->
+      <div id="room-connected-view" class="hidden space-y-4">
+        <div class="p-3.5 bg-emerald-950/40 border border-emerald-600/50 rounded-xl space-y-2 text-center">
+          <div class="text-xs text-emerald-300 font-bold uppercase tracking-wider">Connected to Room</div>
+          <div class="text-3xl font-mono font-black text-amber-400 tracking-widest flex items-center justify-center gap-2">
+            <span id="active-room-code">----</span>
+            <button onclick="copyRoomCode()" class="p-1.5 text-xs bg-mage-dark border border-mage-border rounded-lg text-slate-300 hover:text-white" title="Copy Room Code">
+              <i data-lucide="copy" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <div class="text-xs text-slate-300" id="room-role-status">Connected Players: 1 / 4</div>
+        </div>
+
+        <button onclick="disconnectRoom()" class="w-full py-2 bg-red-950/60 hover:bg-red-900 border border-red-700/60 text-red-200 font-bold rounded-xl text-xs active:scale-95 transition">
+          Leave Room / Disconnect
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- CONDITIONS MANAGEMENT MODAL -->
+  <div id="condition-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-3">
+    <div class="bg-mage-panel border-2 border-mage-border rounded-2xl w-full max-w-sm p-4 shadow-2xl relative text-slate-100 flex flex-col">
+      <button onclick="toggleConditionModal(false)" class="absolute top-3 right-3 text-slate-400 hover:text-white p-1">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+
+      <h3 class="font-cinzel text-base font-bold text-amber-300 mb-3 flex items-center gap-2">
+        <i data-lucide="tag" class="w-4 h-4 text-amber-400"></i>
+        <span>Add Status Condition</span>
+      </h3>
+
+      <div class="grid grid-cols-2 gap-2 text-xs font-semibold" id="condition-picker-buttons">
+        <!-- Buttons injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- NOTIFICATION TOAST -->
+  <div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900 border border-amber-500/80 text-amber-200 px-4 py-2 rounded-xl shadow-2xl text-xs sm:text-sm font-semibold opacity-0 pointer-events-none transition-all duration-300 flex items-center gap-2">
+    <i data-lucide="info" class="w-4 h-4 text-amber-400"></i>
+    <span id="toast-msg">Notice</span>
+  </div>
+
+  <script>
+    /* =====================================================================
+       MAGE PRESETS & GAME CONSTANTS
+       ===================================================================== */
+    const MAGE_PRESETS = [
+      { name: "Beastmaster", life: 36, channel: 9, icon: "paw-print", school: "Nature" },
+      { name: "Priest / Priestess", life: 32, channel: 10, icon: "sun", school: "Holy" },
+      { name: "Warlock", life: 34, channel: 9, icon: "flame", school: "Dark & Fire" },
+      { name: "Wizard", life: 32, channel: 10, icon: "sparkles", school: "Arcane" },
+      { name: "Forcemaster", life: 32, channel: 10, icon: "zap", school: "Mind" },
+      { name: "Warlord", life: 36, channel: 9, icon: "shield-alert", school: "War" },
+      { name: "Druid", life: 34, channel: 9, icon: "trees", school: "Nature" },
+      { name: "Necromancer", life: 32, channel: 10, icon: "skull", school: "Dark" },
+      { name: "Siren", life: 32, channel: 10, icon: "waves", school: "Water" },
+      { name: "Paladin", life: 34, channel: 9, icon: "cross", school: "Holy & War" },
+      { name: "Custom Mage", life: 32, channel: 10, icon: "user", school: "Custom" }
+    ];
+
+    const AVAILABLE_CONDITIONS = [
+      { id: "burn", name: "Burn (燃燒)", color: "text-amber-500 border-amber-600/40 bg-amber-950/30" },
+      { id: "bleed", name: "Bleed (流血)", color: "text-red-500 border-red-600/40 bg-red-950/30" },
+      { id: "stun", name: "Stun (眩暈)", color: "text-yellow-400 border-yellow-600/40 bg-yellow-950/30" },
+      { id: "daze", name: "Daze (恍惚)", color: "text-orange-300 border-orange-600/40 bg-orange-950/30" },
+      { id: "cripple", name: "Cripple (致殘)", color: "text-lime-400 border-lime-600/40 bg-lime-950/30" },
+      { id: "rot", name: "Rot (腐敗)", color: "text-emerald-400 border-emerald-600/40 bg-emerald-950/30" },
+      { id: "weak", name: "Weak (虛弱)", color: "text-cyan-400 border-cyan-600/40 bg-cyan-950/30" },
+      { id: "sleep", name: "Sleep (沉睡)", color: "text-indigo-400 border-indigo-600/40 bg-indigo-950/30" },
+      { id: "tainted", name: "Tainted (受染)", color: "text-purple-400 border-purple-600/40 bg-purple-950/30" }
+    ];
+
+    const ATTACK_DIE_FACES = [
+      { normal: 0, critical: 0, label: "Blank", color: "text-slate-500 bg-slate-900" },
+      { normal: 1, critical: 0, label: "1 Normal", color: "text-amber-300 bg-amber-950/60 border border-amber-700/50" },
+      { normal: 2, critical: 0, label: "2 Normal", color: "text-amber-200 bg-amber-900/60 border border-amber-600/60" },
+      { normal: 0, critical: 1, label: "1 Crit", color: "text-red-400 bg-red-950/70 border border-red-700/50" },
+      { normal: 0, critical: 2, label: "2 Crit", color: "text-red-300 bg-red-900/70 border border-red-600/60" },
+      { normal: 0, critical: 0, label: "Blank", color: "text-slate-500 bg-slate-900" }
+    ];
+
+    /* =====================================================================
+       DEFAULT GAME STATE (EXPANDED TO 4 PLAYERS)
+       ===================================================================== */
+    const DEFAULT_STATE = {
+      round: 1,
+      activeInitiative: 0, // 0..3
+      playerCount: 4,      // 2, 3, or 4
+      mobileView: "all",   // 0, 1, 2, 3, or 'all'
+      targetConditionMageIndex: 0,
+      mages: [
+        { presetName: "Beastmaster", name: "Mage 1", baseLife: 36, damage: 0, mana: 10, channel: 9, quickcastReady: true, armor: 0, guard: false, conditions: {} },
+        { presetName: "Warlock", name: "Mage 2", baseLife: 34, damage: 0, mana: 10, channel: 9, quickcastReady: true, armor: 0, guard: false, conditions: {} },
+        { presetName: "Wizard", name: "Mage 3", baseLife: 32, damage: 0, mana: 10, channel: 10, quickcastReady: true, armor: 0, guard: false, conditions: {} },
+        { presetName: "Priest / Priestess", name: "Mage 4", baseLife: 32, damage: 0, mana: 10, channel: 10, quickcastReady: true, armor: 0, guard: false, conditions: {} }
+      ]
+    };
+
+    let gameState = loadSavedState();
+
+    function loadSavedState() {
+      try {
+        const saved = localStorage.getItem("mw_tracker_state_v2");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return { ...DEFAULT_STATE, ...parsed };
+        }
+      } catch (e) {
+        console.error("Failed to load saved state", e);
+      }
+      return JSON.parse(JSON.stringify(DEFAULT_STATE));
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem("mw_tracker_state_v2", JSON.stringify(gameState));
+      } catch (e) {
+        console.error("Failed to save state", e);
+      }
+      // Broadcast state if multiplayer host
+      syncMultiplayerState();
+    }
+
+    /* =====================================================================
+       WEBRTC / PEERJS MULTIPLAYER NETWORKING (UP TO 4 PLAYERS)
+       ===================================================================== */
+    const APP_PEER_PREFIX = "MW4P-";
+    let peer = null;
+    let peerConnections = []; // Array of connections (Host holds up to 3 clients; client holds 1 host)
+    let isHost = false;
+    let currentRoomCode = null;
+
+    function toggleRoomModal(show) {
+      const modal = document.getElementById('room-modal');
+      if (show) {
+        modal.classList.remove('hidden');
+        lucide.createIcons();
+      } else {
+        modal.classList.add('hidden');
+      }
+    }
+
+    function generateRoomCode() {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let code = "";
+      for (let i = 0; i < 4; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return code;
+    }
+
+    function createRoomAsHost() {
+      if (peer) peer.destroy();
+
+      currentRoomCode = generateRoomCode();
+      const peerId = `${APP_PEER_PREFIX}${currentRoomCode}`;
+      peer = new Peer(peerId);
+
+      peer.on('open', (id) => {
+        isHost = true;
+        peerConnections = [];
+        updateNetworkUI(true, `Host (${currentRoomCode})`, 1);
+        showToast(`Room created! Code: ${currentRoomCode}`);
+      });
+
+      peer.on('connection', (conn) => {
+        if (peerConnections.length >= 3) {
+          conn.send({ type: 'ERROR', message: 'Room full (Max 4 players)' });
+          setTimeout(() => conn.close(), 500);
+          return;
+        }
+
+        peerConnections.push(conn);
+        conn.on('open', () => {
+          // Send current state to newly joined player
+          conn.send({ type: 'FULL_SYNC', state: gameState });
+          updateNetworkUI(true, `Host (${currentRoomCode})`, peerConnections.length + 1);
+          showToast(`Player ${peerConnections.length + 1} connected!`);
+        });
+
+        conn.on('data', (data) => {
+          handleIncomingMessage(data, conn);
+        });
+
+        conn.on('close', () => {
+          peerConnections = peerConnections.filter(c => c !== conn);
+          updateNetworkUI(true, `Host (${currentRoomCode})`, peerConnections.length + 1);
+          showToast(`A player disconnected.`);
+        });
+      });
+
+      peer.on('error', (err) => {
+        console.error(err);
+        showToast(`Network error: ${err.type}`);
+      });
+    }
+
+    function joinRoomWithCode() {
+      const input = document.getElementById('join-room-input').value.trim().toUpperCase();
+      if (!input || input.length < 4) {
+        showToast("Please enter a valid 4-character Room Code.");
+        return;
+      }
+
+      if (peer) peer.destroy();
+
+      peer = new Peer();
+      peer.on('open', () => {
+        const targetPeerId = `${APP_PEER_PREFIX}${input}`;
+        const conn = peer.connect(targetPeerId);
+
+        conn.on('open', () => {
+          isHost = false;
+          currentRoomCode = input;
+          peerConnections = [conn];
+          updateNetworkUI(true, `Client (${input})`, 2);
+          showToast(`Connected to Room ${input}!`);
+        });
+
+        conn.on('data', (data) => {
+          handleIncomingMessage(data, conn);
+        });
+
+        conn.on('close', () => {
+          disconnectRoom();
+          showToast("Host ended the session or connection lost.");
+        });
+      });
+
+      peer.on('error', (err) => {
+        console.error(err);
+        showToast("Could not connect to room. Check the code.");
+      });
+    }
+
+    function handleIncomingMessage(data, senderConn) {
+      if (!data) return;
+
+      if (data.type === 'FULL_SYNC') {
+        // Direct state sync from host
+        gameState = data.state;
+        renderApp();
+      } else if (data.type === 'DISPATCH_ACTION' && isHost) {
+        // Client requesting an action execute on host
+        executeActionLocally(data.action, data.payload);
+        saveState();
+        renderApp();
+      } else if (data.type === 'DICE_ROLLED') {
+        showDiceResultModal(data.results, data.playerName);
+      }
+    }
+
+    function syncMultiplayerState() {
+      if (isHost && peerConnections.length > 0) {
+        peerConnections.forEach(conn => {
+          if (conn.open) {
+            conn.send({ type: 'FULL_SYNC', state: gameState });
+          }
+        });
+      }
+    }
+
+    function dispatchAction(action, payload) {
+      if (!isHost && peerConnections.length > 0) {
+        // Send to host
+        peerConnections[0].send({ type: 'DISPATCH_ACTION', action, payload });
+      } else {
+        // Direct execute (Solo or Host)
+        executeActionLocally(action, payload);
+        saveState();
+        renderApp();
+      }
+    }
+
+    function executeActionLocally(action, payload) {
+      switch (action) {
+        case 'MODIFY_DAMAGE':
+          gameState.mages[payload.mageIdx].damage = Math.max(0, gameState.mages[payload.mageIdx].damage + payload.delta);
+          break;
+        case 'SET_DAMAGE':
+          gameState.mages[payload.mageIdx].damage = Math.max(0, payload.val);
+          break;
+        case 'MODIFY_BASE_LIFE':
+          gameState.mages[payload.mageIdx].baseLife = Math.max(1, gameState.mages[payload.mageIdx].baseLife + payload.delta);
+          break;
+        case 'SET_BASE_LIFE':
+          gameState.mages[payload.mageIdx].baseLife = Math.max(1, payload.val);
+          break;
+        case 'MODIFY_MANA':
+          gameState.mages[payload.mageIdx].mana = Math.max(0, gameState.mages[payload.mageIdx].mana + payload.delta);
+          break;
+        case 'SET_MANA':
+          gameState.mages[payload.mageIdx].mana = Math.max(0, payload.val);
+          break;
+        case 'MODIFY_CHANNEL':
+          gameState.mages[payload.mageIdx].channel = Math.max(0, gameState.mages[payload.mageIdx].channel + payload.delta);
+          break;
+        case 'MODIFY_ARMOR':
+          gameState.mages[payload.mageIdx].armor = Math.max(0, (gameState.mages[payload.mageIdx].armor || 0) + payload.delta);
+          break;
+        case 'TOGGLE_QUICKCAST':
+          gameState.mages[payload.mageIdx].quickcastReady = !gameState.mages[payload.mageIdx].quickcastReady;
+          break;
+        case 'TOGGLE_GUARD':
+          gameState.mages[payload.mageIdx].guard = !gameState.mages[payload.mageIdx].guard;
+          break;
+        case 'SET_INITIATIVE':
+          gameState.activeInitiative = payload.mageIdx;
+          break;
+        case 'APPLY_PRESET':
+          const preset = MAGE_PRESETS.find(p => p.name === payload.presetName);
+          if (preset) {
+            const mage = gameState.mages[payload.mageIdx];
+            mage.presetName = preset.name;
+            mage.name = `Player ${payload.mageIdx + 1} (${preset.name})`;
+            mage.baseLife = preset.life;
+            mage.channel = preset.channel;
+          }
+          break;
+        case 'ADD_CONDITION':
+          const m = gameState.mages[payload.mageIdx];
+          if (!m.conditions) m.conditions = {};
+          m.conditions[payload.condId] = (m.conditions[payload.condId] || 0) + 1;
+          break;
+        case 'DECREMENT_CONDITION':
+          const mageTarget = gameState.mages[payload.mageIdx];
+          if (mageTarget.conditions && mageTarget.conditions[payload.condId]) {
+            mageTarget.conditions[payload.condId] -= 1;
+            if (mageTarget.conditions[payload.condId] <= 0) delete mageTarget.conditions[payload.condId];
+          }
+          break;
+        case 'NEXT_ROUND':
+          for (let i = 0; i < gameState.playerCount; i++) {
+            gameState.mages[i].mana += gameState.mages[i].channel;
+            gameState.mages[i].quickcastReady = true;
+          }
+          gameState.round += 1;
+          gameState.activeInitiative = (gameState.activeInitiative + 1) % gameState.playerCount;
+          break;
+        case 'SET_PLAYER_COUNT':
+          gameState.playerCount = payload.count;
+          if (gameState.activeInitiative >= gameState.playerCount) gameState.activeInitiative = 0;
+          break;
+        case 'RESET_MATCH':
+          gameState.round = 1;
+          gameState.activeInitiative = 0;
+          gameState.mages.forEach(mg => {
+            mg.damage = 0;
+            mg.mana = 10;
+            mg.quickcastReady = true;
+            mg.guard = false;
+            mg.conditions = {};
+          });
+          break;
+      }
+    }
+
+    function updateNetworkUI(connected, label, playerCount) {
+      const dot = document.getElementById('network-indicator-dot');
+      const badgeLabel = document.getElementById('room-status-label');
+      const unconnView = document.getElementById('room-unconnected-view');
+      const connView = document.getElementById('room-connected-view');
+      const roomCodeEl = document.getElementById('active-room-code');
+      const roleStatusEl = document.getElementById('room-role-status');
+
+      if (connected) {
+        dot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
+        badgeLabel.textContent = label;
+        unconnView.classList.add('hidden');
+        connView.classList.remove('hidden');
+        roomCodeEl.textContent = currentRoomCode;
+        roleStatusEl.textContent = isHost 
+          ? `Host Role • Connected Peers: ${playerCount} / 4` 
+          : `Client Role • Connected to Host (${currentRoomCode})`;
+      } else {
+        dot.className = "w-2 h-2 rounded-full bg-slate-500";
+        badgeLabel.textContent = "Offline (Solo)";
+        unconnView.classList.remove('hidden');
+        connView.classList.add('hidden');
+      }
+    }
+
+    function disconnectRoom() {
+      if (peer) peer.destroy();
+      peer = null;
+      peerConnections = [];
+      isHost = false;
+      currentRoomCode = null;
+      updateNetworkUI(false, "Offline (Solo)", 1);
+      showToast("Disconnected from room.");
+    }
+
+    function copyRoomCode() {
+      if (currentRoomCode) {
+        const temp = document.createElement("input");
+        document.body.appendChild(temp);
+        temp.value = currentRoomCode;
+        temp.select();
+        document.execCommand("copy");
+        document.body.removeChild(temp);
+        showToast(`Room code copied: ${currentRoomCode}`);
+      }
+    }
+
+    /* =====================================================================
+       RENDER LOGIC (EXPANDED TO 4 PLAYERS)
+       ===================================================================== */
+    function renderApp() {
+      // 1. Round Display
+      document.getElementById('round-display').textContent = gameState.round;
+
+      // 2. Player count UI buttons
+      [2, 3, 4].forEach(n => {
+        const btn = document.getElementById(`pc-btn-${n}`);
+        if (btn) {
+          btn.className = gameState.playerCount === n 
+            ? "px-2 py-1 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50" 
+            : "px-2 py-1 rounded hover:text-amber-300 text-slate-400";
+        }
+      });
+
+      // 3. Grid rendering for active players
+      const grid = document.getElementById('mages-grid');
+      grid.innerHTML = '';
+      for (let i = 0; i < gameState.playerCount; i++) {
+        const card = document.createElement('section');
+        card.id = `mage-card-${i}`;
+        grid.appendChild(card);
+        renderMageCard(i, card);
+      }
+
+      // 4. Update mobile navigation tabs
+      renderMobileTabs();
+
+      // 5. Conditions picker buttons
+      renderConditionPicker();
+
+      // 6. Refresh lucide icons
+      lucide.createIcons();
+    }
+
+    function renderMobileTabs() {
+      const container = document.getElementById('mobile-tab-bar');
+      if (!container) return;
+
+      let html = `<button onclick="switchMobileTab('all')" class="px-2.5 py-1 rounded ${gameState.mobileView === 'all' ? 'bg-mage-card text-amber-400 font-bold' : 'text-slate-400'}">All</button>`;
+      for (let i = 0; i < gameState.playerCount; i++) {
+        const isActive = gameState.mobileView === i;
+        html += `<button onclick="switchMobileTab(${i})" class="px-2 py-1 rounded ${isActive ? 'bg-mage-card text-amber-400 font-bold' : 'text-slate-400'}">P${i + 1}</button>`;
+      }
+      container.innerHTML = html;
+
+      // Apply mobile view hide/show classes
+      for (let i = 0; i < gameState.playerCount; i++) {
+        const card = document.getElementById(`mage-card-${i}`);
+        if (card) {
+          if (gameState.mobileView === 'all' || gameState.mobileView === i) {
+            card.classList.remove('hidden');
+          } else {
+            card.classList.add('hidden', 'xl:flex');
+          }
+        }
+      }
+    }
+
+    function switchMobileTab(view) {
+      gameState.mobileView = view;
+      renderMobileTabs();
+    }
+
+    function setPlayerCount(count) {
+      dispatchAction('SET_PLAYER_COUNT', { count });
+    }
+
+    function renderMageCard(index, cardEl) {
+      const mage = gameState.mages[index];
+      const isInitiative = gameState.activeInitiative === index;
+      const remainingLife = mage.baseLife - mage.damage;
+      const healthPct = Math.max(0, Math.min(100, Math.round((remainingLife / mage.baseLife) * 100)));
+      const isDefeated = remainingLife <= 0;
+
+      cardEl.className = `bg-mage-panel rounded-2xl border-2 overflow-hidden shadow-2xl transition-all duration-300 relative flex flex-col ${
+        isInitiative ? 'active-initiative border-amber-400' : 'border-mage-border'
+      }`;
+
+      let healthBg = 'bg-emerald-500';
+      let healthText = 'text-emerald-400';
+      if (healthPct <= 25) {
+        healthBg = 'bg-red-600';
+        healthText = 'text-red-500';
+      } else if (healthPct <= 55) {
+        healthBg = 'bg-amber-500';
+        healthText = 'text-amber-400';
+      }
+
+      const conditionsHtml = Object.entries(mage.conditions || {})
+        .filter(([_, count]) => count > 0)
+        .map(([id, count]) => {
+          const conf = AVAILABLE_CONDITIONS.find(c => c.id === id) || { name: id, color: 'text-slate-300 border-slate-700 bg-slate-800' };
+          return `
+            <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-xs font-bold ${conf.color}">
+              <span>${conf.name}</span>
+              <span class="w-4 h-4 flex items-center justify-center rounded-full bg-black/40 text-[10px]">${count}</span>
+              <button onclick="decrementCondition(${index}, '${id}')" class="hover:text-red-300 p-0.5">
+                <i data-lucide="minus" class="w-3 h-3"></i>
+              </button>
+            </div>
+          `;
+        }).join('');
+
+      const presetOptionsHtml = MAGE_PRESETS.map(p => `
+        <option value="${p.name}" ${p.name === mage.presetName ? 'selected' : ''}>${p.name}</option>
+      `).join('');
+
+      cardEl.innerHTML = `
+        <!-- HEADER: Initiative & Preset Selector -->
+        <div class="px-3 py-2 border-b border-mage-border bg-mage-dark/70 flex items-center justify-between gap-1.5">
+          <button onclick="setInitiative(${index})" class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold border transition ${
+            isInitiative 
+              ? 'bg-amber-500/20 text-amber-300 border-amber-500 shadow-sm shadow-amber-500/30' 
+              : 'bg-mage-card text-slate-400 border-mage-border hover:border-slate-500'
+          }" title="Assign Initiative">
+            <i data-lucide="crown" class="w-3.5 h-3.5 ${isInitiative ? 'text-amber-400 fill-amber-400' : ''}"></i>
+            <span>P${index + 1} ${isInitiative ? '1st' : ''}</span>
+          </button>
+
+          <select onchange="applyPreset(${index}, this.value)" class="bg-mage-card text-xs font-semibold text-slate-200 border border-mage-border rounded-lg px-2 py-1 focus:outline-none focus:border-amber-500 max-w-[130px] sm:max-w-[150px] truncate">
+            ${presetOptionsHtml}
+          </select>
+
+          <button onclick="toggleQuickcast(${index})" class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold border transition ${
+            mage.quickcastReady 
+              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500 shadow-sm shadow-cyan-500/20' 
+              : 'bg-slate-900 text-slate-600 border-slate-800'
+          }" title="Quickcast Ready Token">
+            <i data-lucide="zap" class="w-3.5 h-3.5 ${mage.quickcastReady ? 'fill-cyan-300' : ''}"></i>
+            <span>${mage.quickcastReady ? 'QC' : 'USED'}</span>
+          </button>
+        </div>
+
+        ${isDefeated ? `
+          <div class="bg-red-950/90 border-b border-red-700/80 px-2 py-1 text-center text-xs text-red-200 font-black uppercase tracking-wider animate-pulse flex items-center justify-center gap-1">
+            <i data-lucide="skull" class="w-3.5 h-3.5"></i>
+            <span>Mage Defeated</span>
+          </div>
+        ` : ''}
+
+        <div class="p-3 space-y-3 flex-1 flex flex-col justify-between">
+          <!-- HEALTH & DAMAGE -->
+          <div class="bg-mage-card/80 p-2.5 rounded-xl border border-mage-border">
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center gap-1 text-red-400 font-bold text-xs uppercase tracking-wider">
+                <i data-lucide="heart" class="w-3.5 h-3.5 fill-red-500"></i>
+                <span>HP:</span>
+                <span class="text-base font-cinzel font-black ${healthText}">${remainingLife}</span>
+                <span class="text-[10px] text-slate-400">/${mage.baseLife}</span>
+              </div>
+              <div class="text-xs font-semibold text-slate-300 flex items-center gap-1">
+                <span>Dmg:</span>
+                <span class="text-sm font-black text-red-400 font-cinzel">${mage.damage}</span>
+              </div>
+            </div>
+
+            <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-mage-border mb-2.5">
+              <div class="h-full transition-all duration-300 ${healthBg}" style="width: ${healthPct}%"></div>
+            </div>
+
+            <div class="flex items-center justify-between gap-1">
+              <div class="flex items-center gap-1">
+                <button onclick="modifyDamage(${index}, -5)" class="px-2 py-1 bg-mage-dark hover:bg-mage-border text-slate-300 rounded-lg text-xs font-bold border border-mage-border active:scale-95">-5</button>
+                <button onclick="modifyDamage(${index}, -1)" class="w-8 h-8 bg-mage-dark hover:bg-mage-border text-slate-200 rounded-lg text-xs font-black border border-mage-border active:scale-95">-1</button>
+              </div>
+
+              <input type="number" value="${mage.damage}" min="0" onchange="setDamage(${index}, this.value)" class="w-12 bg-mage-dark text-center font-cinzel font-bold text-sm text-red-400 rounded-lg py-1 border border-mage-border focus:outline-none">
+
+              <div class="flex items-center gap-1">
+                <button onclick="modifyDamage(${index}, 1)" class="w-8 h-8 bg-red-950/70 hover:bg-red-900 text-red-300 rounded-lg text-xs font-black border border-red-800/60 active:scale-95">+1</button>
+                <button onclick="modifyDamage(${index}, 5)" class="px-2 py-1 bg-red-950/70 hover:bg-red-900 text-red-300 rounded-lg text-xs font-bold border border-red-800/60 active:scale-95">+5</button>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-1.5 mt-2 pt-1.5 border-t border-mage-border/50 text-[10px] text-slate-400">
+              <span>Max Life:</span>
+              <button onclick="modifyBaseLife(${index}, -1)" class="w-4 h-4 bg-mage-dark rounded flex items-center justify-center border border-mage-border">-</button>
+              <input type="number" value="${mage.baseLife}" min="1" onchange="setBaseLife(${index}, this.value)" class="w-8 bg-mage-dark text-center font-bold text-slate-200 rounded border border-mage-border">
+              <button onclick="modifyBaseLife(${index}, 1)" class="w-4 h-4 bg-mage-dark rounded flex items-center justify-center border border-mage-border">+</button>
+            </div>
+          </div>
+
+          <!-- MANA & CHANNELING -->
+          <div class="bg-mage-card/80 p-2.5 rounded-xl border border-mage-border">
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center gap-1 text-blue-400 font-bold text-xs uppercase tracking-wider">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-blue-400"></i>
+                <span>Mana</span>
+              </div>
+              <div class="flex items-center gap-1 bg-mage-dark px-1.5 py-0.5 rounded-lg border border-mage-border text-[11px] text-slate-300">
+                <span class="text-[9px] text-slate-400 uppercase font-semibold">Chan:</span>
+                <span class="font-cinzel font-bold text-amber-300 text-xs">${mage.channel}</span>
+                <button onclick="modifyChannel(${index}, -1)" class="w-3.5 h-3.5 ml-1 flex items-center justify-center text-slate-400 hover:text-white">-</button>
+                <button onclick="modifyChannel(${index}, 1)" class="w-3.5 h-3.5 flex items-center justify-center text-slate-400 hover:text-white">+</button>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between gap-1">
+              <div class="flex items-center gap-1">
+                <button onclick="modifyMana(${index}, -5)" class="px-2 py-1 bg-mage-dark hover:bg-mage-border text-slate-300 rounded-lg text-xs font-bold border border-mage-border active:scale-95">-5</button>
+                <button onclick="modifyMana(${index}, -1)" class="w-8 h-8 bg-mage-dark hover:bg-mage-border text-slate-200 rounded-lg text-xs font-black border border-mage-border active:scale-95">-1</button>
+              </div>
+
+              <input type="number" value="${mage.mana}" min="0" onchange="setMana(${index}, this.value)" class="w-14 bg-blue-950/40 text-center font-cinzel font-black text-xl text-blue-300 rounded-xl py-0.5 border border-blue-600/50 focus:outline-none">
+
+              <div class="flex items-center gap-1">
+                <button onclick="modifyMana(${index}, 1)" class="w-8 h-8 bg-blue-950/70 hover:bg-blue-900 text-blue-300 rounded-lg text-xs font-black border border-blue-800/60 active:scale-95">+1</button>
+                <button onclick="modifyMana(${index}, 5)" class="px-2 py-1 bg-blue-950/70 hover:bg-blue-900 text-blue-300 rounded-lg text-xs font-bold border border-blue-800/60 active:scale-95">+5</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- DEFENSE & CONDITIONS -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-1 bg-mage-card px-2 py-1 rounded-xl border border-mage-border text-xs flex-1">
+                <i data-lucide="shield" class="w-3.5 h-3.5 text-slate-400"></i>
+                <span class="text-slate-400 text-[10px] font-semibold">Arm:</span>
+                <button onclick="modifyArmor(${index}, -1)" class="w-5 h-5 bg-mage-dark rounded font-bold border border-mage-border text-slate-300 flex items-center justify-center text-xs">-</button>
+                <span class="font-cinzel font-black text-slate-200 text-xs px-0.5">${mage.armor || 0}</span>
+                <button onclick="modifyArmor(${index}, 1)" class="w-5 h-5 bg-mage-dark rounded font-bold border border-mage-border text-slate-300 flex items-center justify-center text-xs">+</button>
+              </div>
+
+              <button onclick="toggleGuard(${index})" class="flex items-center gap-1 px-2.5 py-1 rounded-xl border text-xs font-bold transition ${
+                mage.guard 
+                  ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm' 
+                  : 'bg-mage-card border-mage-border text-slate-400'
+              }">
+                <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i>
+                <span>${mage.guard ? 'GUARD' : 'NO GUARD'}</span>
+              </button>
+            </div>
+
+            <!-- Conditions Badges -->
+            <div class="bg-mage-dark/60 p-1.5 rounded-xl border border-mage-border/70 min-h-[38px] flex flex-wrap items-center gap-1">
+              ${conditionsHtml || '<span class="text-[10px] text-slate-500 italic px-1">No tokens</span>'}
+              <button onclick="openConditionModal(${index})" class="ml-auto px-1.5 py-0.5 bg-mage-card hover:bg-mage-border text-[10px] font-bold text-amber-400 rounded-lg border border-mage-border flex items-center gap-1">
+                <i data-lucide="plus" class="w-2.5 h-2.5"></i> Token
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    /* =====================================================================
+       DISPATCH METHODS
+       ===================================================================== */
+    function modifyDamage(mageIdx, delta) {
+      dispatchAction('MODIFY_DAMAGE', { mageIdx, delta });
+    }
+    function setDamage(mageIdx, val) {
+      dispatchAction('SET_DAMAGE', { mageIdx, val: parseInt(val, 10) || 0 });
+    }
+    function modifyBaseLife(mageIdx, delta) {
+      dispatchAction('MODIFY_BASE_LIFE', { mageIdx, delta });
+    }
+    function setBaseLife(mageIdx, val) {
+      dispatchAction('SET_BASE_LIFE', { mageIdx, val: parseInt(val, 10) || 1 });
+    }
+    function modifyMana(mageIdx, delta) {
+      dispatchAction('MODIFY_MANA', { mageIdx, delta });
+    }
+    function setMana(mageIdx, val) {
+      dispatchAction('SET_MANA', { mageIdx, val: parseInt(val, 10) || 0 });
+    }
+    function modifyChannel(mageIdx, delta) {
+      dispatchAction('MODIFY_CHANNEL', { mageIdx, delta });
+    }
+    function modifyArmor(mageIdx, delta) {
+      dispatchAction('MODIFY_ARMOR', { mageIdx, delta });
+    }
+    function toggleQuickcast(mageIdx) {
+      dispatchAction('TOGGLE_QUICKCAST', { mageIdx });
+    }
+    function toggleGuard(mageIdx) {
+      dispatchAction('TOGGLE_GUARD', { mageIdx });
+    }
+    function setInitiative(mageIdx) {
+      dispatchAction('SET_INITIATIVE', { mageIdx });
+      showToast(`Initiative passed to Mage ${mageIdx + 1}`);
+    }
+    function applyPreset(mageIdx, presetName) {
+      dispatchAction('APPLY_PRESET', { mageIdx, presetName });
+    }
+    function addCondition(condId) {
+      dispatchAction('ADD_CONDITION', { mageIdx: gameState.targetConditionMageIndex, condId });
+      toggleConditionModal(false);
+    }
+    function decrementCondition(mageIdx, condId) {
+      dispatchAction('DECREMENT_CONDITION', { mageIdx, condId });
+    }
+
+    // Upkeep & Next round
+    document.getElementById('btn-next-round').addEventListener('click', () => {
+      dispatchAction('NEXT_ROUND', {});
+      showToast(`Upkeep processed for Round ${gameState.round + 1}`);
+    });
+
+    function executeReset() {
+      dismissResetModal();
+      dispatchAction('RESET_MATCH', {});
+      showToast("Match has been reset!");
+    }
+      ]
+    };
+
+    let gameState = loadSavedState();
+
+    function loadSavedState() {
+      try {
+        const saved = localStorage.getItem("mw_tracker_state");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return { ...DEFAULT_STATE, ...parsed };
+        }
+      } catch (e) {
+        console.error("Failed to load saved state", e);
+      }
+      return JSON.parse(JSON.stringify(DEFAULT_STATE));
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem("mw_tracker_state", JSON.stringify(gameState));
+      } catch (e) {
+        console.error("Failed to save state", e);
+      }
+    }
+
+    /* =====================================================================
+       RENDER LOGIC
+       ===================================================================== */
+    function renderApp() {
+      // 1. Update round display
+      document.getElementById('round-display').textContent = gameState.round;
+
+      // 2. Render each Mage panel
+      gameState.mages.forEach((mage, index) => {
+        renderMageCard(index);
+      });
+
+      // 3. Render condition picker in modal
+      renderConditionPicker();
+
+      // 4. Update mobile view tabs
+      updateMobileTabsUI();
+
+      // 5. Initialize lucide icons
+      lucide.createIcons();
+    }
+
+    function renderMageCard(index) {
+      const mage = gameState.mages[index];
+      const cardEl = document.getElementById(`mage-card-${index}`);
+      if (!cardEl) return;
+
+      const isInitiative = gameState.activeInitiative === index;
+      const remainingLife = mage.baseLife - mage.damage;
+      const healthPct = Math.max(0, Math.min(100, Math.round((remainingLife / mage.baseLife) * 100)));
+      const isDefeated = remainingLife <= 0;
+
+      // Card Border & styling based on initiative
+      cardEl.className = `bg-mage-panel rounded-2xl border-2 overflow-hidden shadow-2xl transition-all duration-300 relative flex flex-col ${
+        isInitiative ? 'active-initiative border-amber-400' : 'border-mage-border'
+      }`;
+
+      // Status color for remaining health
+      let healthBg = 'bg-emerald-500';
+      let healthText = 'text-emerald-400';
+      if (healthPct <= 25) {
+        healthBg = 'bg-red-600';
+        healthText = 'text-red-500';
+      } else if (healthPct <= 55) {
+        healthBg = 'bg-amber-500';
+        healthText = 'text-amber-400';
+      }
+
+      // Build Conditions badges HTML
+      const conditionsHtml = Object.entries(mage.conditions || {})
+        .filter(([_, count]) => count > 0)
+        .map(([id, count]) => {
+          const conf = AVAILABLE_CONDITIONS.find(c => c.id === id) || { name: id, color: 'text-slate-300 border-slate-700 bg-slate-800' };
+          return `
+            <div class="flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs font-bold ${conf.color}">
+              <span>${conf.name}</span>
+              <span class="w-5 h-5 flex items-center justify-center rounded-full bg-black/40 text-[11px]">${count}</span>
+              <button onclick="decrementCondition(${index}, '${id}')" class="hover:text-red-300 p-0.5" title="Reduce / Remove">
+                <i data-lucide="minus" class="w-3 h-3"></i>
+              </button>
+            </div>
+          `;
+        }).join('');
+
+      // Preset options HTML
+      const presetOptionsHtml = MAGE_PRESETS.map(p => `
+        <option value="${p.name}" ${p.name === mage.presetName ? 'selected' : ''}>${p.name}</option>
+      `).join('');
+
+      cardEl.innerHTML = `
+        <!-- CARD HEADER -->
+        <div class="px-3.5 py-2.5 border-b border-mage-border bg-mage-dark/60 flex items-center justify-between gap-2">
+          <!-- Preset selector & initiative indicator -->
+          <div class="flex items-center gap-2 flex-1 min-w-0">
+            <button onclick="setInitiative(${index})" class="flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border transition ${
+              isInitiative 
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500 shadow-sm shadow-amber-500/30' 
+                : 'bg-mage-card text-slate-400 border-mage-border hover:border-slate-500'
+            }" title="Click to grant Initiative">
+              <i data-lucide="crown" class="w-3.5 h-3.5 ${isInitiative ? 'text-amber-400 fill-amber-400' : ''}"></i>
+              <span>${isInitiative ? 'Initiative' : 'Set First'}</span>
+            </button>
+
+            <!-- Mage Selector dropdown -->
+            <select onchange="applyPreset(${index}, this.value)" class="bg-mage-card text-xs font-semibold text-slate-200 border border-mage-border rounded-lg px-2 py-1 focus:outline-none focus:border-amber-500 max-w-[170px] truncate">
+              ${presetOptionsHtml}
+            </select>
+          </div>
+
+          <!-- Quickcast Marker Toggle -->
+          <button onclick="toggleQuickcast(${index})" class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition ${
+            mage.quickcastReady 
+              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500 shadow-sm shadow-cyan-500/20' 
+              : 'bg-slate-900 text-slate-600 border-slate-800'
+          }" title="Toggle Quickcast Marker">
+            <i data-lucide="zap" class="w-3.5 h-3.5 ${mage.quickcastReady ? 'fill-cyan-300' : ''}"></i>
+            <span>${mage.quickcastReady ? 'QC READY' : 'QC USED'}</span>
+          </button>
+        </div>
+
+        <!-- DEFEATED BANNER IF HEALTH <= 0 -->
+        ${isDefeated ? `
+          <div class="bg-red-950/90 border-b border-red-700/80 px-3 py-1.5 text-center text-xs text-red-200 font-black tracking-widest uppercase animate-pulse flex items-center justify-center gap-1.5">
+            <i data-lucide="skull" class="w-4 h-4"></i>
+            <span>Mage Defeated!</span>
+          </div>
+        ` : ''}
+
+        <div class="p-3.5 space-y-3.5 flex-1 flex flex-col justify-between">
+
+          <!-- 1. HEALTH & DAMAGE TRACKER -->
+          <div class="bg-mage-card/80 p-3 rounded-xl border border-mage-border">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-1.5 text-red-400 font-bold text-xs uppercase tracking-wider">
+                <i data-lucide="heart" class="w-4 h-4 fill-red-500"></i>
+                <span>Remaining Health:</span>
+                <span class="text-base font-cinzel font-black ${healthText}">${remainingLife}</span>
+                <span class="text-[10px] text-slate-400">/ ${mage.baseLife} Life</span>
+              </div>
+              <div class="text-xs font-semibold text-slate-300 flex items-center gap-1">
+                <span>Damage:</span>
+                <span class="text-sm font-black text-red-400 font-cinzel">${mage.damage}</span>
+              </div>
+            </div>
+
+            <!-- Health Bar Graphic -->
+            <div class="w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-mage-border mb-3">
+              <div class="h-full transition-all duration-300 ${healthBg}" style="width: ${healthPct}%"></div>
+            </div>
+
+            <!-- Damage Adjustment Buttons -->
+            <div class="flex items-center justify-between gap-1.5">
+              <div class="flex items-center gap-1">
+                <button onclick="modifyDamage(${index}, -5)" class="px-2.5 py-1.5 bg-mage-dark hover:bg-mage-border text-slate-300 rounded-lg text-xs font-bold border border-mage-border active:scale-95">-5</button>
+                <button onclick="modifyDamage(${index}, -1)" class="w-9 h-9 bg-mage-dark hover:bg-mage-border text-slate-200 rounded-lg text-sm font-black border border-mage-border active:scale-95">-1</button>
+              </div>
+
+              <!-- Direct Damage Input -->
+              <div class="flex items-center gap-1">
+                <span class="text-[10px] text-slate-400 uppercase font-bold">Dmg:</span>
+                <input type="number" value="${mage.damage}" min="0" onchange="setDamage(${index}, this.value)" class="w-14 bg-mage-dark text-center font-cinzel font-bold text-sm text-red-400 rounded-lg py-1 border border-mage-border focus:border-red-500 focus:outline-none">
+              </div>
+
+              <div class="flex items-center gap-1">
+                <button onclick="modifyDamage(${index}, 1)" class="w-9 h-9 bg-red-950/70 hover:bg-red-900/80 text-red-300 rounded-lg text-sm font-black border border-red-800/60 active:scale-95">+1</button>
+                <button onclick="modifyDamage(${index}, 5)" class="px-2.5 py-1.5 bg-red-950/70 hover:bg-red-900/80 text-red-300 rounded-lg text-xs font-bold border border-red-800/60 active:scale-95">+5</button>
+              </div>
+            </div>
+
+            <!-- Base Life Adjustment toggle row -->
+            <div class="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-mage-border/50 text-[11px] text-slate-400">
+              <span>Max Life:</span>
+              <button onclick="modifyBaseLife(${index}, -1)" class="w-5 h-5 bg-mage-dark rounded flex items-center justify-center hover:bg-mage-border border border-mage-border font-bold">-</button>
+              <input type="number" value="${mage.baseLife}" min="1" onchange="setBaseLife(${index}, this.value)" class="w-10 bg-mage-dark text-center font-bold text-slate-200 rounded border border-mage-border">
+              <button onclick="modifyBaseLife(${index}, 1)" class="w-5 h-5 bg-mage-dark rounded flex items-center justify-center hover:bg-mage-border border border-mage-border font-bold">+</button>
+            </div>
+          </div>
+
+          <!-- 2. MANA & CHANNELING TRACKER -->
+          <div class="bg-mage-card/80 p-3 rounded-xl border border-mage-border">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-1.5 text-blue-400 font-bold text-xs uppercase tracking-wider">
+                <i data-lucide="sparkles" class="w-4 h-4 text-blue-400"></i>
+                <span>Current Mana</span>
+              </div>
+              <!-- Channeling Info badge -->
+              <div class="flex items-center gap-1 bg-mage-dark px-2 py-0.5 rounded-lg border border-mage-border text-xs text-slate-300">
+                <span class="text-[10px] text-slate-400 uppercase font-semibold">Channel:</span>
+                <span class="font-cinzel font-bold text-amber-300 text-xs">${mage.channel}</span>
+                <button onclick="modifyChannel(${index}, -1)" class="w-4 h-4 ml-1 flex items-center justify-center text-slate-400 hover:text-white">-</button>
+                <button onclick="modifyChannel(${index}, 1)" class="w-4 h-4 flex items-center justify-center text-slate-400 hover:text-white">+</button>
+              </div>
+            </div>
+
+            <!-- Mana Number & Controls -->
+            <div class="flex items-center justify-between gap-1.5">
+              <div class="flex items-center gap-1">
+                <button onclick="modifyMana(${index}, -5)" class="px-2.5 py-1.5 bg-mage-dark hover:bg-mage-border text-slate-300 rounded-lg text-xs font-bold border border-mage-border active:scale-95">-5</button>
+                <button onclick="modifyMana(${index}, -1)" class="w-9 h-9 bg-mage-dark hover:bg-mage-border text-slate-200 rounded-lg text-sm font-black border border-mage-border active:scale-95">-1</button>
+              </div>
+
+              <!-- Current Mana Display & Input -->
+              <div class="flex items-center justify-center">
+                <input type="number" value="${mage.mana}" min="0" onchange="setMana(${index}, this.value)" class="w-16 bg-blue-950/40 text-center font-cinzel font-black text-2xl text-blue-300 rounded-xl py-1 border border-blue-600/50 focus:border-blue-400 focus:outline-none shadow-inner">
+              </div>
+
+              <div class="flex items-center gap-1">
+                <button onclick="modifyMana(${index}, 1)" class="w-9 h-9 bg-blue-950/70 hover:bg-blue-900/80 text-blue-300 rounded-lg text-sm font-black border border-blue-800/60 active:scale-95">+1</button>
+                <button onclick="modifyMana(${index}, 5)" class="px-2.5 py-1.5 bg-blue-950/70 hover:bg-blue-900/80 text-blue-300 rounded-lg text-xs font-bold border border-blue-800/60 active:scale-95">+5</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. DEFENSIVE STATUS & CONDITIONS -->
+          <div class="space-y-2">
+            <!-- Armor & Guard Row -->
+            <div class="flex items-center justify-between gap-2">
+              <!-- Armor tracker -->
+              <div class="flex items-center gap-1.5 bg-mage-card px-2.5 py-1.5 rounded-xl border border-mage-border text-xs flex-1">
+                <i data-lucide="shield" class="w-4 h-4 text-slate-400"></i>
+                <span class="text-slate-400 font-semibold text-[11px]">Armor:</span>
+                <button onclick="modifyArmor(${index}, -1)" class="w-6 h-6 bg-mage-dark hover:bg-mage-border rounded font-bold border border-mage-border text-slate-300 flex items-center justify-center">-</button>
+                <span class="font-cinzel font-black text-slate-200 text-sm px-1">${mage.armor || 0}</span>
+                <button onclick="modifyArmor(${index}, 1)" class="w-6 h-6 bg-mage-dark hover:bg-mage-border rounded font-bold border border-mage-border text-slate-300 flex items-center justify-center">+</button>
+              </div>
+
+              <!-- Guard Toggle -->
+              <button onclick="toggleGuard(${index})" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition ${
+                mage.guard 
+                  ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm shadow-amber-500/20' 
+                  : 'bg-mage-card border-mage-border text-slate-400 hover:text-slate-200'
+              }">
+                <i data-lucide="shield-alert" class="w-4 h-4"></i>
+                <span>${mage.guard ? 'GUARD ON' : 'GUARD'}</span>
+              </button>
+            </div>
+
+            <!-- Conditions List -->
+            <div class="bg-mage-dark/60 p-2 rounded-xl border border-mage-border/70 min-h-[46px] flex flex-wrap items-center gap-1.5">
+              ${conditionsHtml || '<span class="text-[11px] text-slate-500 italic px-1">No active status conditions</span>'}
+              <button onclick="openConditionModal(${index})" class="ml-auto px-2 py-1 bg-mage-card hover:bg-mage-border text-[11px] font-bold text-amber-400 rounded-lg border border-mage-border flex items-center gap-1 active:scale-95 transition">
+                <i data-lucide="plus" class="w-3 h-3"></i> Add Condition
+              </button>
+            </div>
+          </div>
+
+        </div>
+      `;
+    }
+
+    /* =====================================================================
+       STAT MANIPULATION FUNCTIONS
+       ===================================================================== */
+    function modifyDamage(mageIdx, delta) {
+      const mage = gameState.mages[mageIdx];
+      mage.damage = Math.max(0, mage.damage + delta);
+      saveState();
+      renderApp();
+    }
+
+    function setDamage(mageIdx, value) {
+      const val = parseInt(value, 10);
+      gameState.mages[mageIdx].damage = isNaN(val) ? 0 : Math.max(0, val);
+      saveState();
+      renderApp();
+    }
+
+    function modifyBaseLife(mageIdx, delta) {
+      const mage = gameState.mages[mageIdx];
+      mage.baseLife = Math.max(1, mage.baseLife + delta);
+      saveState();
+      renderApp();
+    }
+
+    function setBaseLife(mageIdx, value) {
+      const val = parseInt(value, 10);
+      if (!isNaN(val) && val > 0) {
+        gameState.mages[mageIdx].baseLife = val;
+        saveState();
+        renderApp();
+      }
+    }
+
+    function modifyMana(mageIdx, delta) {
+      const mage = gameState.mages[mageIdx];
+      mage.mana = Math.max(0, mage.mana + delta);
+      saveState();
+      renderApp();
+    }
+
+    function setMana(mageIdx, value) {
+      const val = parseInt(value, 10);
+      gameState.mages[mageIdx].mana = isNaN(val) ? 0 : Math.max(0, val);
+      saveState();
+      renderApp();
+    }
+
+    function modifyChannel(mageIdx, delta) {
+      const mage = gameState.mages[mageIdx];
+      mage.channel = Math.max(0, mage.channel + delta);
+      saveState();
+      renderApp();
+    }
+
+    function modifyArmor(mageIdx, delta) {
+      const mage = gameState.mages[mageIdx];
+      mage.armor = Math.max(0, (mage.armor || 0) + delta);
+      saveState();
+      renderApp();
+    }
+
+    function toggleQuickcast(mageIdx) {
+      const mage = gameState.mages[mageIdx];
+      mage.quickcastReady = !mage.quickcastReady;
+      saveState();
+      renderApp();
+    }
+
+    function toggleGuard(mageIdx) {
+      const mage = gameState.mages[mageIdx];
+      mage.guard = !mage.guard;
+      saveState();
+      renderApp();
+    }
+
+    function setInitiative(mageIdx) {
+      gameState.activeInitiative = mageIdx;
+      saveState();
+      renderApp();
+      showToast(`Initiative passed to ${gameState.mages[mageIdx].presetName}`);
+    }
+
+    function applyPreset(mageIdx, presetName) {
+      const preset = MAGE_PRESETS.find(p => p.name === presetName);
+      if (!preset) return;
+      const mage = gameState.mages[mageIdx];
+      mage.presetName = preset.name;
+      mage.name = `Mage ${mageIdx + 1} (${preset.name})`;
+      mage.baseLife = preset.life;
+      mage.channel = preset.channel;
+      saveState();
+      renderApp();
+      showToast(`${mage.name} preset applied!`);
+    }
+
+    /* =====================================================================
+       ROUND UPKEEP AUTOMATION
+       ===================================================================== */
+    document.getElementById('btn-next-round').addEventListener('click', () => {
+      // 1. Add channeling mana to both mages
+      let upkeepNotes = [];
+      gameState.mages.forEach((m, idx) => {
+        m.mana += m.channel;
+        m.quickcastReady = true; // Refresh Quickcast marker
+        upkeepNotes.push(`${m.presetName}: +${m.channel} Mana`);
+      });
+
+      // 2. Advance round
+      gameState.round += 1;
+
+      // 3. Switch initiative
+      gameState.activeInitiative = gameState.activeInitiative === 0 ? 1 : 0;
+
+      saveState();
+      renderApp();
+
+      showToast(`Round ${gameState.round} Upkeep: Mana channeled, Quickcast ready & Initiative switched!`);
+    });
+
+    /* =====================================================================
+       STATUS CONDITIONS HANDLING
+       ===================================================================== */
+    function openConditionModal(mageIdx) {
+      gameState.targetConditionMageIndex = mageIdx;
+      toggleConditionModal(true);
+    }
+
+    function toggleConditionModal(show) {
+      const modal = document.getElementById('condition-modal');
+      if (show) {
+        modal.classList.remove('hidden');
+      } else {
+        modal.classList.add('hidden');
+      }
+    }
+
+    function renderConditionPicker() {
+      const container = document.getElementById('condition-picker-buttons');
+      container.innerHTML = AVAILABLE_CONDITIONS.map(c => `
+        <button onclick="addCondition('${c.id}')" class="p-2.5 rounded-xl border text-left flex items-center justify-between active:scale-95 transition ${c.color}">
+          <span>${c.name}</span>
+          <i data-lucide="plus-circle" class="w-4 h-4"></i>
+        </button>
+      `).join('');
+    }
+
+    function addCondition(condId) {
+      const mageIdx = gameState.targetConditionMageIndex;
+      const mage = gameState.mages[mageIdx];
+      if (!mage.conditions) mage.conditions = {};
+      mage.conditions[condId] = (mage.conditions[condId] || 0) + 1;
+      saveState();
+      toggleConditionModal(false);
+      renderApp();
+      showToast(`Added ${condId} condition to ${mage.presetName}`);
+    }
+
+    function decrementCondition(mageIdx, condId) {
+      const mage = gameState.mages[mageIdx];
+      if (mage.conditions && mage.conditions[condId]) {
+        mage.conditions[condId] -= 1;
+        if (mage.conditions[condId] <= 0) {
+          delete mage.conditions[condId];
+        }
+        saveState();
+        renderApp();
+      }
+    }
+
+    /* =====================================================================
+       DICE ROLLER SIMULATION (Mage Wars Attack Dice & d12)
+       ===================================================================== */
+    function toggleDiceModal(show) {
+      const modal = document.getElementById('dice-modal');
+      if (show) {
+        modal.classList.remove('hidden');
+        lucide.createIcons();
+      } else {
+        modal.classList.add('hidden');
+      }
+    }
+
+    function adjustDiceCount(delta) {
+      const input = document.getElementById('dice-count-input');
+      let val = parseInt(input.value, 10) || 1;
+      val = Math.max(1, Math.min(30, val + delta));
+      input.value = val;
+    }
+
+    function setDiceCount(val) {
+      document.getElementById('dice-count-input').value = val;
+    }
+
+    function rollMageDice() {
+      const count = parseInt(document.getElementById('dice-count-input').value, 10) || 1;
+      const includeD12 = document.getElementById('include-d12').checked;
+
+      let totalNormal = 0;
+      let totalCritical = 0;
+      const rolledDice = [];
+
+      for (let i = 0; i < count; i++) {
+        const faceIndex = Math.floor(Math.random() * ATTACK_DIE_FACES.length);
+        const face = ATTACK_DIE_FACES[faceIndex];
+        totalNormal += face.normal;
+        totalCritical += face.critical;
+        rolledDice.push(face);
+      }
+
+      // Update Result Box
+      document.getElementById('result-normal').textContent = totalNormal;
+      document.getElementById('result-critical').textContent = totalCritical;
+      document.getElementById('result-total').textContent = totalNormal + totalCritical;
+
+      // Handle d12
+      const d12Box = document.getElementById('d12-result-box');
+      if (includeD12) {
+        const d12Roll = Math.floor(Math.random() * 12) + 1;
+        document.getElementById('d12-val').textContent = d12Roll;
+        d12Box.classList.remove('hidden');
+      } else {
+        d12Box.classList.add('hidden');
+      }
+
+      // Render individual dice badges
+      const listContainer = document.getElementById('individual-dice-list');
+      listContainer.innerHTML = rolledDice.map((d, idx) => `
+        <span class="px-2 py-1 rounded text-[11px] font-bold ${d.color}">
+          #${idx + 1}: ${d.label}
+        </span>
+      `).join('');
+
+      document.getElementById('dice-results-container').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    /* =====================================================================
+       MOBILE VIEW SWITCHER & HELPERS
+       ===================================================================== */
+    function switchMobileTab(view) {
+      gameState.mobileView = view;
+      updateMobileTabsUI();
+    }
+
+    function updateMobileTabsUI() {
+      const m1Card = document.getElementById('mage-card-0');
+      const m2Card = document.getElementById('mage-card-1');
+      const t1 = document.getElementById('tab-m1');
+      const tBoth = document.getElementById('tab-both');
+      const t2 = document.getElementById('tab-m2');
+
+      // Reset tab active styling
+      [t1, tBoth, t2].forEach(btn => {
+        btn.className = "px-2.5 py-1 rounded text-slate-400 text-xs font-semibold";
+      });
+
+      if (gameState.mobileView === 0) {
+        m1Card.classList.remove('hidden');
+        m2Card.classList.add('hidden', 'md:flex');
+        t1.className = "px-2.5 py-1 rounded font-bold text-amber-400 bg-mage-card border border-mage-border";
+      } else if (gameState.mobileView === 1) {
+        m1Card.classList.add('hidden', 'md:flex');
+        m2Card.classList.remove('hidden');
+        t2.className = "px-2.5 py-1 rounded font-bold text-amber-400 bg-mage-card border border-mage-border";
+      } else {
+        m1Card.classList.remove('hidden');
+        m2Card.classList.remove('hidden');
+        tBoth.className = "px-2 py-1 rounded font-bold text-amber-400 bg-mage-card border border-mage-border";
+      }
+    }
+
+    function confirmReset() {
+      // In-page replacement for confirm()
+      if (document.getElementById('reset-modal')) return;
+
+      const modalHtml = `
+        <div id="reset-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div class="bg-mage-panel border-2 border-red-800/80 rounded-2xl w-full max-w-xs p-5 shadow-2xl text-center">
+            <i data-lucide="alert-triangle" class="w-10 h-10 text-red-500 mx-auto mb-2"></i>
+            <h4 class="font-cinzel text-lg font-bold text-slate-100 mb-1">Reset Game Match?</h4>
+            <p class="text-xs text-slate-400 mb-4">All damage, mana, status conditions and rounds will be reset to initial state.</p>
+            <div class="flex gap-2">
+              <button onclick="dismissResetModal()" class="flex-1 py-2 rounded-xl bg-mage-card text-xs font-bold text-slate-300 border border-mage-border">Cancel</button>
+              <button onclick="executeReset()" class="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-bold text-white shadow-lg shadow-red-950/60">Yes, Reset</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+      lucide.createIcons();
+    }
+
+    function dismissResetModal() {
+      const m = document.getElementById('reset-modal');
+      if (m) m.remove();
+    }
+
+    function executeReset() {
+      dismissResetModal();
+      gameState = JSON.parse(JSON.stringify(DEFAULT_STATE));
+      saveState();
+      renderApp();
+      showToast("Match has been reset to Round 1!");
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      const msgEl = document.getElementById('toast-msg');
+      msgEl.textContent = msg;
+      toast.classList.remove('opacity-0', 'pointer-events-none');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.add('opacity-0', 'pointer-events-none');
+      }, 2600);
+    }
+
+    // INITIAL SETUP
+    window.addEventListener('DOMContentLoaded', () => {
+      renderApp();
+    });
+  </script>
+</body>
+</html>
